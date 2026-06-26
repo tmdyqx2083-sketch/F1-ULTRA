@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>بازی ماشین - بی‌نهایت</title>
+<link href="https://fonts.googleapis.com/css2?family=Lalezar&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{overflow:hidden;background:#1a1a2e;font-family:sans-serif;touch-action:manipulation;}
+canvas{display:block;}
+#menu{position:fixed;inset:0;background:rgba(0,0,0,0.9);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;color:white;padding:20px;}
+#menu h1{font-family: 'Lalezar', cursive; font-size:4rem; margin-bottom:10px; text-shadow:0 0 30px #f39c12; letter-spacing:2px;}
+#menu button{padding:15px 40px;font-size:1.5rem;border:none;border-radius:40px;background:#f39c12;color:#1a1a2e;font-weight:bold;cursor:pointer;margin:10px;}
+#menu button:active{transform:scale(0.9);}
+.controls{position:fixed;bottom:20px;width:100%;display:flex;justify-content:space-around;z-index:10;}
+.btn{width:80px;height:80px;border-radius:50%;font-size:20px;border:none;touch-action:manipulation;}
+.orange{background:#f39c12;color:black;}
+.dark{background:rgba(0,0,0,0.7);color:white;}
+#ui{position:fixed;top:10px;left:10px;color:white;font-size:18px;text-shadow:1px 1px 3px black;z-index:10;}
+#ui span{font-weight:bold;}
+#speedBox{position:fixed;top:10px;right:10px;width:130px;height:130px;z-index:10;}
+#torbolMsg{position:fixed;top:20px;left:50%;transform:translateX(-50%);font-family:'Lalezar', cursive;font-size:28px;color:#f1c40f;text-shadow:0 0 15px #ffd700;z-index:30;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap;}
+#over{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.9);padding:30px;border-radius:20px;display:none;text-align:center;color:white;z-index:20;border:2px solid #f39c12;}
+#over h2{font-size:3rem;margin-bottom:10px;}
+#over p{font-size:1.5rem; margin:8px 0;}
+#over button{padding:15px 40px;font-size:1.5rem;background:#f39c12;border:none;border-radius:30px;color:black;font-weight:bold;cursor:pointer;margin-top:10px;}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="menu">
+<h1>🚗 بی‌نهایت</h1>
+<button id="startBtn">شروع بازی</button>
+<button id="carBtn">🎨 تعویض رنگ ماشین</button><button id="shopBtn">فروشگاه</button>
+</div>
+
+<div id="ui">
+سرعت: <span id="speedNum">0</span> km/h<br>
+دنده: <span id="gearNum">1</span><br>
+امتیاز: <span id="score">0</span><br>
+رکورد: <span id="highScoreDisplay">0</span><br>
+💰 توربول: <span id="torbolDisplay">0</span><br>🚀 نیترو: <span id="nitroDisplay">3</span>
+</div>
+
+<div id="torbolMsg">۱ توربول دریافت شد</div>
+
+<canvas id="speedBox" width="130" height="130"></canvas>
+
+<div class="controls">
+<button class="btn dark" id="L">⬅️</button>
+<button class="btn dark" id="R">➡️</button>
+<button class="btn orange" id="gas">گاز</button>
+<button class="btn orange" id="brake">ترمز</button><button class="btn orange" id="nitroBtn">🚀</button>
+</div>
+
+<div id="over">
+<h2>😭باختی</h2>
+<p>امتیاز: <span id="finalScore">0</span></p>
+<p>رکورد: <span id="finalHigh">0</span></p>
+<button onclick="location.reload()">دوباره</button>
+</div>
+
+<script>
+// -------------------------------
+// متغیرهای اصلی
+// -------------------------------
+const c = document.getElementById('c');
+const x = c.getContext('2d');
+let w, h;
+function resize() {
+    w = c.width = window.innerWidth;
+    h = c.height = window.innerHeight;
+}
+resize();
+window.onresize = resize;
+
+let car = { x: 0, y: 0, vx: 0, speed: 0, max: 300 };
+let gameRunning = false;
+let score = 0;
+let highScore = parseInt(localStorage.getItem("carGameHighScore") || "0", 10);
+let L = false, R = false, gas = false, brake = false;
+let currentGear = 1;
+let nitro=3;
+let selectedCar=localStorage.getItem('selectedCarColor')||'#e74c3c';
+
+let ownedCars=JSON.parse(localStorage.getItem('ownedCars')||'["#e74c3c"]');
+
+
+let torbolCollected = 0;
+
+try{
+    torbolCollected = parseInt(localStorage.getItem('torbolCoins') || '0',10);
+}catch(e){
+    torbolCollected = 0;
+}
+
+document.getElementById('highScoreDisplay').innerText = highScore;
+document.getElementById('torbolDisplay').innerText = torbolCollected;
+
+
+function resetCar() {
+    car.x = w / 2 - 35;
+    car.y = h - 150;
+}
+resetCar();
+
+// -------------------------------
+// صداها
+// -------------------------------
+let audioCtx = null;
+let gasOsc = null, gasGain = null, gasLfo = null, gasLfoGain = null;
+let isGasActive = false;
+let cutoffActive = false;
+
+function initAudio() {
+    if (audioCtx) return audioCtx;
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        return audioCtx;
+    } catch (e) { return null; }
+}
+
+function buildGasSound() {
+    if (!audioCtx || gasOsc) return true;
+    try {
+        gasOsc = audioCtx.createOscillator();
+        gasOsc.type = 'sawtooth';
+        gasOsc.frequency.setValueAtTime(60, audioCtx.currentTime);
+        gasGain = audioCtx.createGain();
+        gasGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gasLfo = audioCtx.createOscillator();
+        gasLfo.type = 'sine';
+        gasLfo.frequency.value = 28;
+        gasLfoGain = audioCtx.createGain();
+        gasLfoGain.gain.value = 18;
+        gasLfo.connect(gasLfoGain);
+        gasLfoGain.connect(gasOsc.frequency);
+        gasOsc.connect(gasGain);
+        gasGain.connect(audioCtx.destination);
+        gasOsc.start();
+        gasLfo.start();
+        return true;
+    } catch (e) { return false; }
+}
+
+function startGasSound() {
+    const ctx = initAudio();
+    if (!ctx || !gameRunning) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    if (isGasActive) return;
+    buildGasSound();
+    isGasActive = true;
+    gasGain.gain.setTargetAtTime(0.45, ctx.currentTime, 0.05);
+}
+
+function stopGasSound() {
+    if (!audioCtx || !isGasActive) return;
+    isGasActive = false;
+    const now = audioCtx.currentTime;
+    gasGain.gain.setTargetAtTime(0, now, 0.1);
+}
+
+function playBrakeSound() {
+    const ctx = initAudio();
+    if (!ctx || !gameRunning) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    try {
+        const now = ctx.currentTime;
+        const noise = ctx.createBufferSource();
+        const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.6, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
+        noise.buffer = buffer;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(2800, now);
+        filter.Q.value = 2;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.6, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+        noise.start(now);
+    } catch (e) {}
+}
+
+function playTurboSound() {
+    const ctx = initAudio();
+    if (!ctx || !gameRunning) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    try {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1500, now);
+        osc.frequency.exponentialRampToValueAtTime(5500, now + 0.3);
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.4);
+    } catch (e) {}
+}
+
+function playCoinSound() {
+    const ctx = initAudio();
+    if (!ctx || !gameRunning) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    try {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.1);
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    } catch(e) {}
+}
+
+// -------------------------------
+// دنده
+// -------------------------------
+function getGear(speed) {
+    if (speed < 50) return 1;
+    if (speed < 100) return 2;
+    if (speed < 150) return 3;
+    if (speed < 200) return 4;
+    if (speed < 250) return 5;
+    return 6;
+}
+
+// -------------------------------
+// رسم کیلومترشمار
+// -------------------------------
+function drawSpeedometer(speed, gear) {
+    const canvas = document.getElementById('speedBox');
+    const ctx = canvas.getContext('2d');
+    const cx = 65, cy = 65, radius = 55;
+    ctx.clearRect(0, 0, 130, 130);
+    
+    const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, radius + 5);
+    grad.addColorStop(0, '#2a2a2a');
+    grad.addColorStop(1, '#0a0a0a');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    const maxSpeed = 300;
+    const angleStart = -135 * Math.PI / 180;
+    const angleEnd = 135 * Math.PI / 180;
+    const ratio = Math.min(speed / maxSpeed, 1);
+    const currentAngle = angleStart + (angleEnd - angleStart) * ratio;
+
+    const gradArc = ctx.createLinearGradient(15, 15, 115, 115);
+    gradArc.addColorStop(0, '#00ff88');
+    gradArc.addColorStop(0.5, '#ffdd00');
+    gradArc.addColorStop(0.8, '#ff8800');
+    gradArc.addColorStop(1, '#ff2222');
+    ctx.strokeStyle = gradArc;
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius - 5, angleStart, currentAngle);
+    ctx.stroke();
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = 'bold 8px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let s = 0; s <= maxSpeed; s += 50) {
+        const r = s / maxSpeed;
+        const a = angleStart + (angleEnd - angleStart) * r;
+        const dist = radius - 12;
+        const px = cx + dist * Math.cos(a);
+        const py = cy + dist * Math.sin(a);
+        ctx.fillText(s.toString(), px, py);
+    }
+
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText(Math.floor(speed), cx, cy - 8);
+    ctx.font = '10px Arial';
+    ctx.fillText('km/h', cx, cy + 14);
+
+    ctx.font = 'bold 16px Arial';
+    ctx.fillStyle = '#f39c12';
+    ctx.fillText('D' + gear, cx, cy + 32);
+}
+
+// -------------------------------
+// رسم ماشین
+// -------------------------------
+
+function drawCar(x0, y0, color) {
+
+    const w = 70;
+    const h = 120;
+
+    x.fillStyle = "#111";
+    x.fillRect(x0 + 2, y0 + 15, 12, 24);
+    x.fillRect(x0 + w - 14, y0 + 15, 12, 24);
+    x.fillRect(x0 + 2, y0 + h - 40, 12, 24);
+    x.fillRect(x0 + w - 14, y0 + h - 40, 12, 24);
+
+    x.fillStyle = "#000";
+    x.fillRect(x0 + 8, y0 + h - 12, w - 16, 8);
+
+    x.fillStyle = color;
+    x.beginPath();
+    x.moveTo(x0 + w/2, y0);
+    x.lineTo(x0 + w - 18, y0 + 35);
+    x.lineTo(x0 + w - 12, y0 + 90);
+    x.lineTo(x0 + w/2 + 12, y0 + h);
+    x.lineTo(x0 + w/2 - 12, y0 + h);
+    x.lineTo(x0 + 12, y0 + 90);
+    x.lineTo(x0 + 18, y0 + 35);
+    x.closePath();
+    x.fill();
+
+    x.fillRect(x0 + w/2 - 5, y0, 10, 45);
+
+    x.fillStyle = "#000";
+    x.fillRect(x0 + 10, y0 + 5, w - 20, 6);
+
+    x.fillStyle = "#222";
+    x.beginPath();
+    x.ellipse(x0 + w/2, y0 + 55, 10, 18, 0, 0, Math.PI * 2);
+    x.fill();
+
+    x.strokeStyle = "rgba(255,255,255,0.3)";
+    x.lineWidth = 2;
+    x.beginPath();
+    x.moveTo(x0 + w/2, y0 + 10);
+    x.lineTo(x0 + w/2, y0 + h - 15);
+    x.stroke();
+
+    x.fillStyle = "#ff3333";
+    x.fillRect(x0 + w/2 - 4, y0 + h - 8, 8, 4);
+}
+
+
+// -------------------------------
+// دشمن‌ها
+// -------------------------------
+let enemies = [];
+function spawnEnemy() {
+    if (!gameRunning) return;
+    const rw = w * 0.9, rx = (w - rw) / 2, lw = rw / 4;
+    const lane = Math.floor(Math.random() * 4);
+    const colors = ['#f1c40f', '#2ecc71', '#e67e22', '#9b59b6', '#ea2027'];
+    enemies.push({
+        x: rx + lane * lw + lw / 2 - 35,
+        y: -120,
+        w: 70, h: 120,
+        s: 4 + Math.random() * 3,
+        color: colors[Math.floor(Math.random() * colors.length)]
+    });
+}
+setInterval(spawnEnemy, 1000);
+
+// -------------------------------
+// سکه‌ها (توربول)
+// -------------------------------
+let coins = [];
+function spawnCoin() {
+    if (!gameRunning) return;
+    const rw = w * 0.9, rx = (w - rw) / 2, lw = rw / 4;
+    const lane = Math.floor(Math.random() * 4);
+    const coinX = rx + lane * lw + lw / 2;
+    coins.push({
+        x: coinX,
+        y: -30,
+        r: 14,
+        collected: false
+    });
+}
+setInterval(spawnCoin, 2000);
+
+function showTorbolMessage() {
+    const msg = document.getElementById('torbolMsg');
+    msg.style.opacity = '1';
+    clearTimeout(window.torbolMsgTimer);
+    window.torbolMsgTimer = setTimeout(() => {
+        msg.style.opacity = '0';
+    }, 1500);
+}
+
+// -------------------------------
+// حلقه اصلی بازی
+// -------------------------------
+function gameLoop() {
+    if (!gameRunning) {
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+    x.clearRect(0, 0, w, h);
+
+    // جاده
+    x.fillStyle = '#2ecc71';
+    x.fillRect(0, 0, w, h);
+    const rw = w * 0.9, rx = (w - rw) / 2;
+    x.fillStyle = '#444';
+    x.fillRect(rx, 0, rw, h);
+    const laneW = rw / 4;
+    x.strokeStyle = 'orange';
+    x.setLineDash([20, 20]);
+    for (let i = 1; i < 4; i++) {
+        x.beginPath();
+        x.moveTo(rx + i * laneW, 0);
+        x.lineTo(rx + i * laneW, h);
+        x.stroke();
+    }
+    x.setLineDash([]);
+
+    // فیزیک سرعت
+    if (gas) car.speed += 0.8; 
+    if (brake) car.speed -= 2.5;
+    if (!gas && !brake) car.speed *= 0.98;
+    if (car.speed < 0) car.speed = 0;
+    if (car.speed > car.max) car.speed = car.max;
+    let km = Math.floor(car.speed);
+
+    // کاتاف رگباری
+    if (km >= 300 && gas) {
+        cutoffActive = !cutoffActive;
+        km = cutoffActive ? 296 + Math.floor(Math.random() * 4) : 300;
+    } else {
+        cutoffActive = false;
+    }
+
+    document.getElementById("speedNum").innerText = km;
+    const newGear = getGear(km);
+    if (newGear !== currentGear) {
+        if (newGear > currentGear) playTurboSound();
+        currentGear = newGear;
+        document.getElementById("gearNum").innerText = currentGear;
+    }
+
+    // صدای موتور
+    if (isGasActive && gasOsc) {
+        if (cutoffActive) {
+            gasGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+            gasOsc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        } else {
+            gasGain.gain.setTargetAtTime(0.45, audioCtx.currentTime, 0.02);
+            const freq = 60 + (km / 300) * 450;
+            try { gasOsc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.04); } catch(e){}
+        }
+    }
+
+    drawSpeedometer(km, currentGear);
+
+    // حرکت افقی
+    if (L) car.vx -= 1.4;
+    if (R) car.vx += 1.4;
+    car.vx *= 0.8;
+    car.x += car.vx;
+    if (car.x < rx) car.x = rx;
+    if (car.x + 70 > rx + rw) car.x = rx + rw - 70;
+
+    drawCar(car.x, car.y, selectedCar);
+if(gas && car.speed>150){
+x.fillStyle='orange';
+x.beginPath();
+x.arc(car.x+35,car.y+125,6,0,Math.PI*2);
+x.fill();
+}
+
+    // دشمن‌ها
+    for (let e of enemies) {
+        e.y += e.s + car.speed * 0.15;
+        drawCar(e.x, e.y, e.color);
+        const padding = 12;
+        if (
+            car.x + padding < e.x + e.w - padding &&
+            car.x + 70 - padding > e.x + padding &&
+            car.y + padding < e.y + e.h - padding &&
+            car.y + 120 - padding > e.y + padding
+        ) {
+            gameOver();
+            return;
+        }
+    }
+    enemies = enemies.filter(e => e.y < h + 100);
+
+    // سکه‌ها
+    for (let coin of coins) {
+        coin.y += 2 + car.speed * 0.12;
+        x.beginPath();
+        x.arc(coin.x, coin.y, coin.r, 0, Math.PI*2);
+        x.fillStyle = '#FFD700';
+        x.shadowColor = '#ffaa00';
+        x.shadowBlur = 8;
+        x.fill();
+        x.shadowBlur = 0;
+        x.strokeStyle = '#b8860b';
+        x.lineWidth = 2;
+        x.stroke();
+        x.fillStyle = '#b8860b';
+        x.font = 'bold 16px Arial';
+        x.textAlign = 'center';
+        x.textBaseline = 'middle';
+        x.fillText('₮', coin.x, coin.y);
+
+        if (!coin.collected) {
+            if (coin.x + coin.r > car.x && coin.x - coin.r < car.x + 70 &&
+                coin.y + coin.r > car.y && coin.y - coin.r < car.y + 120) {
+                coin.collected = true;
+                torbolCollected++;
+                try{
+                    localStorage.setItem('torbolCoins', String(torbolCollected));
+                }catch(e){}
+                try{localStorage.setItem('torbolCoins', torbolCollected);}catch(e){}
+                document.getElementById('torbolDisplay').innerText = torbolCollected;
+                showTorbolMessage();
+                playCoinSound();
+            }
+        }
+    }
+    coins = coins.filter(c => !c.collected && c.y < h + 50);
+
+    // امتیاز
+    if (km > 0) {
+        score += Math.ceil(km / 50);
+    }
+    document.getElementById("score").innerText = score;
+    if (score > highScore) {
+        highScore = score;
+        try{localStorage.setItem("carGameHighScore", highScore);}catch(e){}
+    }
+    document.getElementById('highScoreDisplay').innerText = highScore;
+
+    requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+    document.getElementById("over").style.display = "block";
+    document.getElementById("finalScore").innerText = score;
+    if (score > highScore) {
+        highScore = score;
+        try { localStorage.setItem('carGameHighScore', highScore); } catch(e) {}
+        document.getElementById('highScoreDisplay').innerText = highScore;
+    }
+    document.getElementById("finalHigh").innerText = highScore;
+    gameRunning = false;
+    stopGasSound();
+}
+
+// -------------------------------
+// کنترل‌ها
+// -------------------------------
+document.getElementById('startBtn').addEventListener('click', function() {
+    console.log('دکمه شروع کلیک شد'); // برای دیباگ
+    const ctx = initAudio();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+    gameRunning = true;
+    document.getElementById('menu').style.display = 'none';
+    resetCar();
+    score = 0;
+    // torbol محفوظ می‌ماند
+    document.getElementById('score').innerText = 0;
+    document.getElementById('torbolDisplay').innerText = torbolCollected;
+    document.getElementById('highScoreDisplay').innerText = highScore;
+    enemies = [];
+    coins = [];
+    if (!window._loopStarted) {
+        window._loopStarted = true;
+        gameLoop();
+    }
+});
+
+const gasBtn = document.getElementById('gas');
+const brakeBtn = document.getElementById('brake');
+const Lbtn = document.getElementById('L');
+const Rbtn = document.getElementById('R');
+
+gasBtn.addEventListener('mousedown', () => { if(gameRunning){ gas = true; startGasSound(); }});
+gasBtn.addEventListener('mouseup', () => { gas = false; stopGasSound(); });
+gasBtn.addEventListener('mouseleave', () => { gas = false; stopGasSound(); });
+gasBtn.addEventListener('touchstart', (e)=>{e.preventDefault(); if(gameRunning){ gas = true; startGasSound(); }}, {passive:false});
+gasBtn.addEventListener('touchend', () => { gas = false; stopGasSound(); });
+
+brakeBtn.addEventListener('mousedown', () => { if(gameRunning){ brake = true; playBrakeSound(); }});
+brakeBtn.addEventListener('mouseup', () => { brake = false; });
+brakeBtn.addEventListener('touchstart', (e)=>{e.preventDefault(); if(gameRunning){ brake = true; playBrakeSound(); }}, {passive:false});
+brakeBtn.addEventListener('touchend', () => { brake = false; });
+
+Lbtn.addEventListener('mousedown', () => L = true);
+Lbtn.addEventListener('mouseup', () => L = false);
+Lbtn.addEventListener('mouseleave', () => L = false);
+Lbtn.addEventListener('touchstart', (e)=>{e.preventDefault(); L = true;}, {passive:false});
+Lbtn.addEventListener('touchend', () => L = false);
+
+Rbtn.addEventListener('mousedown', () => R = true);
+Rbtn.addEventListener('mouseup', () => R = false);
+Rbtn.addEventListener('mouseleave', () => R = false);
+Rbtn.addEventListener('touchstart', (e)=>{e.preventDefault(); R = true;}, {passive:false});
+Rbtn.addEventListener('touchend', () => R = false);
+
+
+document.getElementById('carBtn').addEventListener('click',function(){
+ const cars=['#e74c3c','#3498db','#f1c40f','#2ecc71'];
+ let i=cars.indexOf(selectedCar);
+ selectedCar=cars[(i+1)%cars.length];
+ localStorage.setItem('selectedCarColor',selectedCar);
+ alert('رنگ ماشین تغییر کرد!');
+});
+
+window._loopStarted = false;
+
+
+document.getElementById('shopBtn').addEventListener('click',()=>{
+document.getElementById('shop').style.display='block';
+});
+
+function buyCar(color,price){
+ if(ownedCars.includes(color)){selectedCar=color;localStorage.setItem('selectedCarColor',color);alert('این ماشین انتخاب شد');return;}
+ if(torbolCollected<price){alert('توربول کافی نیست');return;}
+ torbolCollected-=price;
+ localStorage.setItem('torbolCoins',torbolCollected);
+ selectedCar=color;
+ localStorage.setItem('selectedCarColor',color);
+ document.getElementById('torbolDisplay').innerText=torbolCollected;
+ ownedCars.push(color);
+ localStorage.setItem('ownedCars',JSON.stringify(ownedCars));
+ alert('خرید انجام شد و ذخیره شد');
+}
+
+document.getElementById('nitroBtn').addEventListener('click',()=>{
+ if(nitro<=0)return;
+ nitro--;
+ document.getElementById('nitroDisplay').innerText=nitro;
+ car.speed=Math.min(car.speed+120,420);
+});
+
+console.log('F1 ULTRA 2.0');
+</script>
+
+
+<div id="shop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);flex-direction:column;justify-content:center;align-items:center;z-index:2000;color:white;padding:20px;">
+<h1 style="font-family:Lalezar,cursive;font-size:3rem;margin-bottom:20px;color:#f39c12;">🏎️ فروشگاه F1</h1>
+<button style="padding:15px 40px;font-size:1.3rem;border:none;border-radius:40px;background:#f39c12;margin:8px;" onclick="buyCar('#e74c3c',50)">فراری - 50 توربول</button>
+<button style="padding:15px 40px;font-size:1.3rem;border:none;border-radius:40px;background:#f39c12;margin:8px;" onclick="buyCar('#3498db',100)">مرسدس - 100 توربول</button>
+<button style="padding:15px 40px;font-size:1.3rem;border:none;border-radius:40px;background:#f39c12;margin:8px;" onclick="buyCar('#f1c40f',150)">ردبول - 150 توربول</button>
+<button style="padding:15px 40px;font-size:1.3rem;border:none;border-radius:40px;background:#f39c12;margin:8px;" onclick="buyCar('#2ecc71',200)">مک‌لارن - 200 توربول</button>
+<button style="padding:15px 40px;font-size:1.2rem;border:none;border-radius:40px;background:#666;color:white;margin-top:20px;" onclick="document.getElementById('shop').style.display='none'">بستن</button>
+</div>
+
+
+<div id="upgradeInfo" style="position:fixed;bottom:110px;left:10px;color:white;background:rgba(0,0,0,.5);padding:8px;border-radius:10px;z-index:20;">
+🚀 نیترو پیشرفته فعال
+</div>
+
+
+<script>
+// F1 ULTRA 6.0
+try{
+if(!localStorage.getItem('f1NightMode')){
+ localStorage.setItem('f1NightMode','off');
+}
+}catch(e){}
+</script>
+
+</body>
+</html>
+<script>
+try{
+ let lastReward=localStorage.getItem('dailyRewardDate');
+ let today=new Date().toDateString();
+ if(lastReward!==today){
+   let t=parseInt(localStorage.getItem('torbolCoins')||'0');
+   t+=25;
+   localStorage.setItem('torbolCoins',t);
+   localStorage.setItem('dailyRewardDate',today);
+   alert('🎁 جایزه روزانه: 25 توربول');
+ }
+}catch(e){}
+</script>
